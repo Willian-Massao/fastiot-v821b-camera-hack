@@ -1,0 +1,10 @@
+# Exemplo de configuracao para o servidor go2rtc
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+
+streams:
+  Entrada:
+    - rtsp://admin:Ztac@2021@192.168.15.72:554/live/camid_0/main

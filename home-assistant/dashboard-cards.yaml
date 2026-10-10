@@ -1,0 +1,99 @@
+# ==============================================================================
+# OPCAO 1: Card 100% Nativo do Home Assistant (Nao requer HACS)
+# ==============================================================================
+type: vertical-stack
+cards:
+  - type: picture-entity
+    entity: camera.camera_fastiot # ou camera.generic_camera
+    name: Camera IP
+    camera_view: live
+
+  - type: grid
+    columns: 3
+    square: false
+    cards:
+      - type: button
+        icon: mdi:arrow-top-left
+        show_name: false
+        tap_action:
+          action: none
+
+      - type: button
+        icon: mdi:arrow-up-bold
+        show_name: false
+        tap_action:
+          action: call-service
+          service: rest_command.camera_ptz
+          data:
+            direction: u
+
+      - type: button
+        icon: mdi:arrow-top-right
+        show_name: false
+        tap_action:
+          action: none
+
+      - type: button
+        icon: mdi:arrow-left-bold
+        show_name: false
+        tap_action:
+          action: call-service
+          service: rest_command.camera_ptz
+          data:
+            direction: l
+
+      - type: button
+        icon: mdi:stop-circle-outline
+        show_name: false
+        tap_action:
+          action: call-service
+          service: rest_command.camera_ptz
+          data:
+            direction: s
+
+      - type: button
+        icon: mdi:arrow-right-bold
+        show_name: false
+        tap_action:
+          action: call-service
+          service: rest_command.camera_ptz
+          data:
+            direction: r
+
+      - type: button
+        icon: mdi:arrow-bottom-left
+        show_name: false
+        tap_action:
+          action: none
+
+      - type: button
+        icon: mdi:arrow-down-bold
+        show_name: false
+        tap_action:
+          action: call-service
+          service: rest_command.camera_ptz
+          data:
+            direction: d
+
+      - type: button
+        icon: mdi:arrow-bottom-right
+        show_name: false
+        tap_action:
+          action: none
+
+# ==============================================================================
+# OPCAO 2: Card Customizado WebRTC Camera (Requer AlexxIT/WebRTC Camera via HACS)
+# ==============================================================================
+# type: custom:webrtc-camera
+# url: Entrada # Nome do stream configurado no go2rtc.yaml
+# title: Camera Entrada
+# ptz:
+#   service: rest_command.camera_ptz
+#   data_left:
+#     direction: l
+#   data_right:
+#     direction: r
+#   data_up:
+#     direction: u
+#   data_down:
+#     direction: d

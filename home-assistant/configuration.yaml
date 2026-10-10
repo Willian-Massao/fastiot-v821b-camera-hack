@@ -1,0 +1,34 @@
+# Home Assistant configuration.yaml snippet
+
+rest_command:
+  # Comando generico parametrizado
+  camera_ptz:
+    url: "http://192.168.15.72:8080/cmd?dir={{ direction }}"
+    method: GET
+
+  # Comandos individuais para facil uso em automacoes
+  camera_ptz_up:
+    url: "http://192.168.15.72:8080/cmd?dir=u"
+    method: GET
+
+  camera_ptz_down:
+    url: "http://192.168.15.72:8080/cmd?dir=d"
+    method: GET
+
+  camera_ptz_left:
+    url: "http://192.168.15.72:8080/cmd?dir=l"
+    method: GET
+
+  camera_ptz_right:
+    url: "http://192.168.15.72:8080/cmd?dir=r"
+    method: GET
+
+  camera_ptz_stop:
+    url: "http://192.168.15.72:8080/cmd?dir=s"
+    method: GET
+
+# Opcional: Adicionar a camera diretamente pelo YAML (ou pela interface em 'Generic Camera')
+camera:
+  - platform: ffmpeg
+    name: Camera FastIoT
+    input: "rtsp://admin:Ztac@2021@192.168.15.72:554/live/camid_0/main"

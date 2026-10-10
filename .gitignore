@@ -1,0 +1,17 @@
+# Temporary / Compiled objects
+*.o
+*.b64
+*.log
+
+# OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Backup files
+*.bkp
+*.bak
