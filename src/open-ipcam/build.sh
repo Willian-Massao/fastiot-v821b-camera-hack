@@ -9,7 +9,7 @@ CC=riscv32-linux-musl-gcc
 echo "=== Compiling Open-IPCam for RISC-V 32-bit (Allwinner V821B) ==="
 
 CFLAGS="-O2 -Wall -Wextra -Iinclude"
-SRCS="main.c motor_ctrl.c gpio_ctrl.c rtsp_server.c http_server.c ha_mqtt.c"
+SRCS="main.c motor_ctrl.c gpio_ctrl.c rtsp_server.c http_server.c ha_mqtt.c wifi_mgr.c"
 
 echo "1. Building dynamic binary (open-ipcam)..."
 $CC $CFLAGS $SRCS -o open-ipcam -lpthread

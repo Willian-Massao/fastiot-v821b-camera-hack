@@ -2,7 +2,7 @@ CC ?= riscv32-linux-musl-gcc
 CFLAGS ?= -O2 -Wall -Wextra -Iinclude -D_GNU_SOURCE
 LDFLAGS ?= -lpthread
 
-SRCS = main.c motor_ctrl.c gpio_ctrl.c rtsp_server.c http_server.c ha_mqtt.c
+SRCS = main.c motor_ctrl.c gpio_ctrl.c rtsp_server.c http_server.c ha_mqtt.c wifi_mgr.c
 OBJS = $(SRCS:.c=.o)
 TARGET = open-ipcam
 

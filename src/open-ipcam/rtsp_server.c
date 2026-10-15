@@ -70,6 +70,7 @@ static void handle_options(int fd, int cseq) {
 }
 
 static void handle_describe(int fd, int cseq, const char *url, const char *ip_str) {
+    (void)url;
     char sdp[1024];
     snprintf(sdp, sizeof(sdp),
         "v=0\r\n"
@@ -318,6 +319,7 @@ void *rtsp_server_thread(void *arg) {
 }
 
 int rtsp_broadcast_h264_nalu(int stream_id, const uint8_t *nalu, size_t len, uint32_t timestamp) {
+    (void)stream_id;
     if (!nalu || len == 0) return 0;
 
     pthread_mutex_lock(&g_clients_mutex);

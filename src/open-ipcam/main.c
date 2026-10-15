@@ -4,6 +4,7 @@
 #include "rtsp_server.h"
 #include "http_server.h"
 #include "ha_mqtt.h"
+#include "wifi_mgr.h"
 
 app_config_t g_config;
 app_state_t g_state;
@@ -21,18 +22,18 @@ static void load_config_file(const char *path) {
 
     char line[256];
     while (fgets(line, sizeof(line), f)) {
-        char key[64], val[128];
-        if (sscanf(line, "%63[^=]=%127s", key, val) == 2) {
+        char key[64], val[64];
+        if (sscanf(line, "%63[^=]=%63s", key, val) == 2) {
             // Trim whitespace
             if (strcmp(key, "http_port") == 0) g_config.http_port = atoi(val);
             else if (strcmp(key, "rtsp_port") == 0) g_config.rtsp_port = atoi(val);
             else if (strcmp(key, "motor_speed") == 0) g_config.default_motor_speed = atoi(val);
             else if (strcmp(key, "motor_step") == 0) g_config.motor_step_size = atoi(val);
             else if (strcmp(key, "mqtt_enabled") == 0) g_config.mqtt_enabled = (atoi(val) == 1 || strcmp(val, "true") == 0);
-            else if (strcmp(key, "mqtt_broker") == 0) strncpy(g_config.mqtt_broker, val, sizeof(g_config.mqtt_broker) - 1);
+            else if (strcmp(key, "mqtt_broker") == 0) snprintf(g_config.mqtt_broker, sizeof(g_config.mqtt_broker), "%s", val);
             else if (strcmp(key, "mqtt_port") == 0) g_config.mqtt_port = atoi(val);
-            else if (strcmp(key, "mqtt_user") == 0) strncpy(g_config.mqtt_username, val, sizeof(g_config.mqtt_username) - 1);
-            else if (strcmp(key, "mqtt_pass") == 0) strncpy(g_config.mqtt_password, val, sizeof(g_config.mqtt_password) - 1);
+            else if (strcmp(key, "mqtt_user") == 0) snprintf(g_config.mqtt_username, sizeof(g_config.mqtt_username), "%s", val);
+            else if (strcmp(key, "mqtt_pass") == 0) snprintf(g_config.mqtt_password, sizeof(g_config.mqtt_password), "%s", val);
         }
     }
     fclose(f);
@@ -80,12 +81,16 @@ int main(int argc, char **argv) {
     gpio_init_all();
     motor_init();
 
+    LOG_INFO("Initializing Wi-Fi Subsystem...");
+    wifi_mgr_init();
+
     LOG_INFO("Starting Network Services...");
     rtsp_server_init(g_config.rtsp_port);
     http_server_init(g_config.http_port);
     ha_mqtt_init();
 
-    pthread_t th_rtsp, th_http, th_mqtt;
+    pthread_t th_rtsp, th_http, th_mqtt, th_wifi;
+    pthread_create(&th_wifi, NULL, wifi_mgr_thread, NULL);
     pthread_create(&th_rtsp, NULL, rtsp_server_thread, NULL);
     pthread_create(&th_http, NULL, http_server_thread, NULL);
     if (g_config.mqtt_enabled) {
@@ -101,10 +106,12 @@ int main(int argc, char **argv) {
     }
 
     LOG_INFO("Stopping services...");
+    wifi_mgr_stop();
     rtsp_server_stop();
     http_server_stop();
     ha_mqtt_stop();
 
+    pthread_join(th_wifi, NULL);
     pthread_join(th_rtsp, NULL);
     pthread_join(th_http, NULL);
     if (g_config.mqtt_enabled) {

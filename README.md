@@ -27,12 +27,18 @@ A partir da desmontagem do firmware original e análise estática via **Ghidra 1
    - **Sirene / Amplificador de Áudio (`SPK_EN`)**: GPIO `79` (habilita amplificador do alto-falante).
    - **Botão de Reset**: GPIO `102`.
 
-3. **Novo App Substituto Open Source (`open-ipcam`)**:
-   - Binário C nativo e ultraleve (~34 KB a 106 KB estático) compilado com `riscv32-linux-musl-gcc`.
+3. **Provisionamento Wi-Fi Automático (Modo AP -> Modo Estação)**:
+   - **Primeiro Boot / Sem Wi-Fi**: A câmera cria seu próprio ponto de acesso Wi-Fi (**`OpenIPCam-Setup`** com IP `192.168.4.1`) servindo um portal web responsivo.
+   - **Busca e Conexão de Redes**: Permite escanear as redes Wi-Fi 2.4GHz locais e selecionar a rede desejada diretamente pela interface web.
+   - **Desativação Automática do AP**: Assim que a câmera se conecta com sucesso à rede do usuário e adquire um IP via DHCP, a rede `OpenIPCam-Setup` é **completamente desligada**, tornando a câmera acessível única e exclusivamente pela rede local do usuário.
+   - **Reset de Emergência**: Caso o Wi-Fi mude ou a senha esteja incorreta, segurar o botão físico de reset (GPIO `102`) por 3 segundos ou acessar `/api/wifi/reset` restaura instantaneamente o ponto de acesso `OpenIPCam-Setup`.
+
+4. **Novo App Substituto Open Source (`open-ipcam`)**:
+   - Binário C nativo e ultraleve (~46 KB dinâmico / 122 KB estático) compilado com `riscv32-linux-musl-gcc`.
    - **Zero Nuvem**: Não faz conexões externas para `sightcloud.cn` ou servidores desconhecidos.
    - **Servidor RTSP Integrado (RFC 2326)** na porta `554` (suporta RTP UDP e TCP Interleaved para Home Assistant/go2rtc).
-   - **Painel Web Responsivo** na porta `8080` com teclado direcional PTZ, alternador de visão noturna (Dia / Noite IR / Noite Colorida), gatilho de sirene e métricas do sistema.
-   - **REST API Completa**: Endpoints JSON para Home Assistant (`/api/status`, `/api/ptz`, `/api/nightvision`, `/api/siren`).
+   - **Painel Web Responsivo** na porta `8080` com configuração de Wi-Fi, teclado direcional PTZ, alternador de visão noturna (Dia / Noite IR / Noite Colorida), gatilho de sirene e métricas do sistema.
+   - **REST API Completa**: Endpoints JSON para Home Assistant (`/api/status`, `/api/ptz`, `/api/nightvision`, `/api/siren`, `/api/wifi/scan`, `/api/wifi/setup`, `/api/wifi/reset`).
    - **Home Assistant MQTT Auto-Discovery**: Descoberta automática de câmera, botões PTZ, interruptores de iluminação e sirene no Home Assistant via MQTT.
 
 ---
@@ -120,6 +126,9 @@ A partir da desmontagem do firmware original e análise estática via **Ghidra 1
 | **API REST PTZ** | TCP `8080` (HTTP) | `POST http://<IP_DA_CAMERA>:8080/api/ptz?dir=<u\|d\|l\|r\|s\|h>` |
 | **API REST Visão Noturna** | TCP `8080` (HTTP) | `POST http://<IP_DA_CAMERA>:8080/api/nightvision?mode=<day\|ir\|color\|auto>` |
 | **API REST Sirene** | TCP `8080` (HTTP) | `POST http://<IP_DA_CAMERA>:8080/api/siren?state=<on\|off>` |
+| **API Busca Wi-Fi** | TCP `8080` (HTTP) | `GET http://<IP_DA_CAMERA>:8080/api/wifi/scan` |
+| **API Setup Wi-Fi** | TCP `8080` (HTTP) | `POST http://<IP_DA_CAMERA>:8080/api/wifi/setup?ssid=<SSID>&password=<PASS>` |
+| **API Reset Wi-Fi** | TCP `8080` (HTTP) | `POST http://<IP_DA_CAMERA>:8080/api/wifi/reset` |
 
 ---
 
