@@ -16,5 +16,8 @@ __pycache__/
 *.bkp
 *.bak
 
+# Firmware binary images (generated)
+firmware/*.bin
+
 # Agent files
 .agents/
