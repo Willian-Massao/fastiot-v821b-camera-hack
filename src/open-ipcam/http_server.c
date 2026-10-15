@@ -130,6 +130,18 @@ static const char HTML_DASHBOARD[] =
 "                <code id=\"urlSub\">rtsp://admin:Ztac@2021@IP:554/live/camid_0/sub</code>\n"
 "            </div>\n"
 "        </div>\n"
+"\n"
+"        <!-- Atualizacao de Firmware via Web (OTA) -->\n"
+"        <div class=\"card\">\n"
+"            <div class=\"section-title\">&#x1F680; Atualizacao de Firmware (OTA via Web)</div>\n"
+"            <p style=\"font-size:12px; color:var(--sub); margin: 6px 0 10px 0;\">\n"
+"                Grave firmware diretamente pela rede sem precisar desmontar a camera nem usar gravador USB CH341A.<br>\n"
+"                Suporta o arquivo completo <code>open-ipcam-v821b-8mb.bin</code> (8MB) ou a particao <code>system.squashfs</code> (~2.4MB).\n"
+"            </p>\n"
+"            <input type=\"file\" id=\"fw-file\" accept=\".bin,.squashfs,.img\" style=\"margin-bottom:8px;\">\n"
+"            <button id=\"btn-flash\" class=\"btn-ctl btn-danger\" style=\"width:100%;\" onclick=\"uploadFirmware()\">&#x26A1; Gravar Firmware &amp; Reiniciar</button>\n"
+"            <div id=\"flash-status\" style=\"margin-top:10px; font-size:12px; display:none;\"></div>\n"
+"        </div>\n"
 "    </div>\n"
 "\n"
 "    <script>\n"
@@ -213,6 +225,61 @@ static const char HTML_DASHBOARD[] =
 "        }\n"
 "        setInterval(updateStatus, 3000);\n"
 "        updateStatus();\n"
+"\n"
+"        function uploadFirmware() {\n"
+"            const fileInput = document.getElementById('fw-file');\n"
+"            if (!fileInput.files || fileInput.files.length === 0) {\n"
+"                alert('Por favor, selecione um arquivo de firmware (.bin ou .squashfs).');\n"
+"                return;\n"
+"            }\n"
+"            const file = fileInput.files[0];\n"
+"            const sizeMB = (file.size / 1024 / 1024).toFixed(2);\n"
+"            if (!confirm('ATENCAO: Deseja realmente gravar \\'' + file.name + '\\' (' + sizeMB + ' MB) na memoria flash da camera?\\n\\nATENCAO: NAO DESLIGUE A CAMERA DA TOMADA DURANTE O PROCESSO!')) {\n"
+"                return;\n"
+"            }\n"
+"            const btn = document.getElementById('btn-flash');\n"
+"            const status = document.getElementById('flash-status');\n"
+"            btn.disabled = true;\n"
+"            status.style.display = 'block';\n"
+"            status.innerHTML = '<span style=\"color:#ff9000;\">&#x23F3; Enviando arquivo: 0%...</span>';\n"
+"\n"
+"            const xhr = new XMLHttpRequest();\n"
+"            xhr.open('POST', '/api/flash', true);\n"
+"            xhr.setRequestHeader('Content-Type', 'application/octet-stream');\n"
+"            xhr.setRequestHeader('X-File-Name', encodeURIComponent(file.name));\n"
+"\n"
+"            xhr.upload.onprogress = function(e) {\n"
+"                if (e.lengthComputable) {\n"
+"                    const pct = Math.round((e.loaded / e.total) * 100);\n"
+"                    status.innerHTML = '<span style=\"color:#ff9000;\">&#x23F3; Enviando arquivo: ' + pct + '% (' + (e.loaded/1024/1024).toFixed(1) + '/' + sizeMB + ' MB)...</span>';\n"
+"                }\n"
+"            };\n"
+"\n"
+"            xhr.onload = function() {\n"
+"                if (xhr.status === 200) {\n"
+"                    status.innerHTML = '<span style=\"color:#04d361; font-weight:bold;\">&#x2705; Upload concluido! Gravando na memoria flash NOR...<br>A camera reiniciara em cerca de 20 segundos. Reconectando automaticamente...</span>';\n"
+"                    let count = 25;\n"
+"                    const timer = setInterval(() => {\n"
+"                        count--;\n"
+"                        status.innerHTML = '<span style=\"color:#04d361; font-weight:bold;\">&#x2705; Gravando flash e reiniciando (' + count + 's)...</span>';\n"
+"                        if (count <= 0) {\n"
+"                            clearInterval(timer);\n"
+"                            window.location.reload();\n"
+"                        }\n"
+"                    }, 1000);\n"
+"                } else {\n"
+"                    btn.disabled = false;\n"
+"                    status.innerHTML = '<span style=\"color:#e83f5b;\">&#x274C; Erro (' + xhr.status + '): ' + xhr.responseText + '</span>';\n"
+"                }\n"
+"            };\n"
+"\n"
+"            xhr.onerror = function() {\n"
+"                btn.disabled = false;\n"
+"                status.innerHTML = '<span style=\"color:#e83f5b;\">&#x274C; Falha de conexao ao enviar firmware.</span>';\n"
+"            };\n"
+"\n"
+"            xhr.send(file);\n"
+"        }\n"
 "    </script>\n"
 "</body>\n"
 "</html>\n";
@@ -410,6 +477,91 @@ static void handle_api_siren(int fd, const char *query) {
     send_http_response(fd, 200, "application/json", resp, strlen(resp));
 }
 
+static void handle_api_flash(int client_fd, const char *req, ssize_t initial_len) {
+    const char *cl_ptr = strcasestr(req, "Content-Length:");
+    if (!cl_ptr) {
+        const char resp[] = "{\"status\":\"error\",\"message\":\"Missing Content-Length header\"}\n";
+        send_http_response(client_fd, 400, "application/json", resp, strlen(resp));
+        return;
+    }
+    size_t content_len = strtoul(cl_ptr + 15, NULL, 10);
+    if (content_len == 0 || content_len > 10 * 1024 * 1024) {
+        const char resp[] = "{\"status\":\"error\",\"message\":\"Tamanho de arquivo invalido (max 10MB)\"}\n";
+        send_http_response(client_fd, 400, "application/json", resp, strlen(resp));
+        return;
+    }
+
+    const char *body_start = strstr(req, "\r\n\r\n");
+    size_t header_len = 0;
+    if (body_start) {
+        body_start += 4;
+        header_len = body_start - req;
+    } else {
+        body_start = strstr(req, "\n\n");
+        if (body_start) {
+            body_start += 2;
+            header_len = body_start - req;
+        } else {
+            const char resp[] = "{\"status\":\"error\",\"message\":\"Requisicao HTTP malformada\"}\n";
+            send_http_response(client_fd, 400, "application/json", resp, strlen(resp));
+            return;
+        }
+    }
+
+    FILE *f = fopen("/tmp/firmware_upload.bin", "wb");
+    if (!f) {
+        const char resp[] = "{\"status\":\"error\",\"message\":\"Erro ao criar arquivo /tmp/firmware_upload.bin\"}\n";
+        send_http_response(client_fd, 500, "application/json", resp, strlen(resp));
+        return;
+    }
+
+    size_t initial_body_bytes = 0;
+    if (initial_len > (ssize_t)header_len) {
+        initial_body_bytes = initial_len - header_len;
+        if (initial_body_bytes > content_len) {
+            initial_body_bytes = content_len;
+        }
+        fwrite(body_start, 1, initial_body_bytes, f);
+    }
+
+    size_t bytes_written = initial_body_bytes;
+    char chunk[16384];
+    while (bytes_written < content_len) {
+        size_t to_read = content_len - bytes_written;
+        if (to_read > sizeof(chunk)) {
+            to_read = sizeof(chunk);
+        }
+        ssize_t n = recv(client_fd, chunk, to_read, 0);
+        if (n <= 0) break;
+        fwrite(chunk, 1, n, f);
+        bytes_written += n;
+    }
+    fclose(f);
+
+    if (bytes_written != content_len) {
+        LOG_ERROR("Upload incompleto de firmware: esperado %zu, recebido %zu", content_len, bytes_written);
+        const char resp[] = "{\"status\":\"error\",\"message\":\"Upload de firmware incompleto ou corrompido\"}\n";
+        send_http_response(client_fd, 400, "application/json", resp, strlen(resp));
+        unlink("/tmp/firmware_upload.bin");
+        return;
+    }
+
+    char resp[256];
+    snprintf(resp, sizeof(resp),
+        "{\"status\":\"flashing\",\"size\":%zu,\"message\":\"Upload concluido com sucesso (%zu bytes). Gravando firmware na memoria flash e reiniciando a camera...\"}\n",
+        bytes_written, bytes_written);
+    send_http_response(client_fd, 200, "application/json", resp, strlen(resp));
+
+    LOG_INFO("Firmware recebido com sucesso (%zu bytes). Executando flash_firmware.sh...", bytes_written);
+    if (access("/system/bin/flash_firmware.sh", X_OK) == 0) {
+        system("/system/bin/flash_firmware.sh /tmp/firmware_upload.bin > /tmp/flash.log 2>&1 &");
+    } else if (access("/media/FastIoT_factoryTest/flash_firmware.sh", X_OK) == 0) {
+        system("/media/FastIoT_factoryTest/flash_firmware.sh /tmp/firmware_upload.bin > /tmp/flash.log 2>&1 &");
+    } else {
+        system("sh /system/bin/flash_firmware.sh /tmp/firmware_upload.bin > /tmp/flash.log 2>&1 &");
+    }
+}
+
 static void handle_http_client(int client_fd) {
     char req[HTTP_BUF_SIZE];
     ssize_t n = recv(client_fd, req, sizeof(req) - 1, 0);
@@ -428,6 +580,8 @@ static void handle_http_client(int client_fd) {
     // Routing
     if (strcmp(uri, "/") == 0 || strcmp(uri, "/index.html") == 0) {
         send_http_response(client_fd, 200, "text/html", HTML_DASHBOARD, sizeof(HTML_DASHBOARD) - 1);
+    } else if (strncmp(uri, "/api/flash", 10) == 0) {
+        handle_api_flash(client_fd, req, n);
     } else if (strncmp(uri, "/api/status", 11) == 0) {
         handle_api_status(client_fd);
     } else if (strncmp(uri, "/api/wifi/scan", 14) == 0) {

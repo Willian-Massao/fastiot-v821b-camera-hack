@@ -17,6 +17,7 @@ import sys
 import shutil
 import subprocess
 import hashlib
+import json
 
 FLASH_TOTAL_SIZE = 8388608  # 8 MB
 SYSTEM_OFFSET = 0x51A000     # 5.349.376
@@ -70,6 +71,11 @@ echo 0x420000ac 0x33111111 > /sys/class/sunxi_dump/write 2>/dev/null
 mkdir -p /userdata/Config
 if [ ! -f /userdata/local_timezone ]; then
     ln -s /system/zoneinfo/Shanghai /userdata/local_timezone 2>/dev/null
+fi
+if [ ! -f /userdata/Config/Rtspconfig ]; then
+    echo "user=admin" > /userdata/Config/Rtspconfig
+    echo "passwd=" >> /userdata/Config/Rtspconfig
+    echo "auth=0" >> /userdata/Config/Rtspconfig
 fi
 
 export LD_LIBRARY_PATH="/system/lib:/lib:/usr/lib:/usr/local/lib"
@@ -173,6 +179,7 @@ def main():
     src_busybox = os.path.join(SDCARD_DIR, "busybox")
     src_block_wan = os.path.join(SDCARD_DIR, "block_wan.sh")
     src_ptz_bridge = os.path.join(SDCARD_DIR, "ptz_bridge.so")
+    src_flash_fw = os.path.join(SDCARD_DIR, "flash_firmware.sh")
     src_conf = os.path.join(SDCARD_DIR, "open-ipcam.conf")
 
     # Copia open-ipcam para /system/bin/open-ipcam
@@ -190,10 +197,77 @@ def main():
         shutil.copy2(src_ptz_bridge, os.path.join(lib_dir, "ptz_bridge.so"))
         os.chmod(os.path.join(lib_dir, "ptz_bridge.so"), 0o755)
 
+    # Copia flash_firmware.sh para /system/bin/flash_firmware.sh
+    if os.path.exists(src_flash_fw):
+        shutil.copy2(src_flash_fw, os.path.join(bin_dir, "flash_firmware.sh"))
+        os.chmod(os.path.join(bin_dir, "flash_firmware.sh"), 0o755)
+
     # Copia arquivo de configuracao para /system/config/
     cfg_dir = os.path.join(staging_dir, "config")
     os.makedirs(cfg_dir, exist_ok=True)
     shutil.copy2(src_conf, os.path.join(cfg_dir, "open-ipcam.conf"))
+
+    # 2.1 Otimiza configuracao do ipcam para transmissao basica pura (sem nuvem, sem gravacao, sem alarmes)
+    print("[2.1/6] Otimizando ipcam para streaming basico puro (Zero Cloud / Local-only)...")
+    devinfo_path = os.path.join(staging_dir, "dev_info", "model_devinfo_Q302S1AX2_V821B.json")
+    if os.path.exists(devinfo_path):
+        try:
+            with open(devinfo_path, "r", encoding="utf-8") as f:
+                devinfo = json.load(f)
+            cap = devinfo.get("Cap", {})
+            cap.get("Storage", {})["Cloud"] = False
+            cap.get("Storage", {})["CloudChannel"] = 0
+            cap.get("Storage", {})["SDInfoReport"] = False
+            cap.get("Storage", {})["SDRecordSpeed"] = False
+            cap.get("Storage", {})["SDRecordDownload"] = False
+            cap.get("Device", {})["ForceUpdateServer"] = False
+            cap.get("Alarm", {})["MotionDetect"] = False
+            cap.get("Alarm", {})["PersonDetect"] = False
+            cap.get("Alarm", {})["SoundDetect"] = False
+            cap.get("Alarm", {})["CustomAlarmTone"] = False
+            if "AlertAlarm" in cap.get("Alarm", {}):
+                cap["Alarm"]["AlertAlarm"]["enable"] = False
+            if "AI" in cap:
+                cap["AI"]["AiSuport"] = []
+            with open(devinfo_path, "w", encoding="utf-8") as f:
+                json.dump(devinfo, f, indent=4)
+            print("      model_devinfo atualizado (recursos de nuvem e IA desativados).")
+        except Exception as e:
+            print(f"      [!] Aviso ao atualizar model_devinfo: {e}")
+
+    smartipc_path = os.path.join(staging_dir, "config", "sample_smartIPC_demo.conf")
+    if os.path.exists(smartipc_path):
+        try:
+            with open(smartipc_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+            new_lines = []
+            for line in lines:
+                stripped = line.strip()
+                if stripped.startswith("audio_test_enable"):
+                    new_lines.append("audio_test_enable = 0\n")
+                elif stripped.startswith("capture_en"):
+                    new_lines.append("capture_en = 0\n")
+                elif stripped.startswith("playback_en"):
+                    new_lines.append("playback_en = 0\n")
+                elif stripped.startswith("motionAlarm_on"):
+                    new_lines.append("motionAlarm_on = 0\n")
+                elif stripped.startswith("main_file_path"):
+                    new_lines.append('main_file_path = ""\n')
+                elif stripped.startswith("main_isp_test_enable"):
+                    new_lines.append("main_isp_test_enable = 0\n")
+                elif stripped.startswith("main_offline_raw_simulate_type"):
+                    new_lines.append("main_offline_raw_simulate_type = -1\n")
+                elif stripped.startswith("main_isp_tdm_raw_process_type"):
+                    new_lines.append("main_isp_tdm_raw_process_type = -1\n")
+                elif stripped.startswith("main_venc_recreate_enable"):
+                    new_lines.append("main_venc_recreate_enable = 0\n")
+                else:
+                    new_lines.append(line)
+            with open(smartipc_path, "w", encoding="utf-8", newline="\n") as f:
+                f.writelines(new_lines)
+            print("      sample_smartIPC_demo.conf atualizado (alarmes e gravacoes em loop desativados).")
+        except Exception as e:
+            print(f"      [!] Aviso ao atualizar sample_smartIPC_demo.conf: {e}")
 
     # 3. Atualizar start.sh
     print("[3/6] Atualizando start.sh para inicializacao nativa...")
@@ -248,9 +322,15 @@ def main():
     with open(OUTPUT_BIN, "wb") as f:
         f.write(flash_data)
 
+    # Exporta tambem a particao SquashFS isolada para atualizacao OTA leve via Web
+    output_sqfs = os.path.join(BASE_DIR, "firmware", "open-ipcam-system.squashfs")
+    shutil.copy2(new_squashfs, output_sqfs)
+
     # Copia tambem para a pasta de firmware para conveniencia
     firmware_copy = os.path.join(FIRMWARE_DIR, "open-ipcam-v821b-8mb.bin")
+    firmware_sqfs_copy = os.path.join(FIRMWARE_DIR, "open-ipcam-system.squashfs")
     shutil.copy2(OUTPUT_BIN, firmware_copy)
+    shutil.copy2(output_sqfs, firmware_sqfs_copy)
 
     # 6. Verificacao Final
     final_size = os.path.getsize(OUTPUT_BIN)
