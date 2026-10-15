@@ -1,34 +1,78 @@
-# Home Assistant configuration.yaml snippet
+# ====================================================================
+# Home Assistant configuration.yaml
+# Integracao Open-IPCam V821B (100% Local, Zero Nuvem)
+# ====================================================================
 
 rest_command:
-  # Comando generico parametrizado
+  # PTZ Motor Controls
   camera_ptz:
-    url: "http://192.168.15.72:8080/cmd?dir={{ direction }}"
-    method: GET
+    url: "http://192.168.15.72:8080/api/ptz?dir={{ direction }}{% if steps is defined %}&steps={{ steps }}{% endif %}"
+    method: POST
 
-  # Comandos individuais para facil uso em automacoes
   camera_ptz_up:
-    url: "http://192.168.15.72:8080/cmd?dir=u"
-    method: GET
+    url: "http://192.168.15.72:8080/api/ptz?dir=u"
+    method: POST
 
   camera_ptz_down:
-    url: "http://192.168.15.72:8080/cmd?dir=d"
-    method: GET
+    url: "http://192.168.15.72:8080/api/ptz?dir=d"
+    method: POST
 
   camera_ptz_left:
-    url: "http://192.168.15.72:8080/cmd?dir=l"
-    method: GET
+    url: "http://192.168.15.72:8080/api/ptz?dir=l"
+    method: POST
 
   camera_ptz_right:
-    url: "http://192.168.15.72:8080/cmd?dir=r"
-    method: GET
+    url: "http://192.168.15.72:8080/api/ptz?dir=r"
+    method: POST
 
   camera_ptz_stop:
-    url: "http://192.168.15.72:8080/cmd?dir=s"
-    method: GET
+    url: "http://192.168.15.72:8080/api/ptz?dir=s"
+    method: POST
 
-# Opcional: Adicionar a camera diretamente pelo YAML (ou pela interface em 'Generic Camera')
+  camera_ptz_home:
+    url: "http://192.168.15.72:8080/api/ptz?dir=h"
+    method: POST
+
+  # Iluminacao e Visao Noturna
+  camera_night_day:
+    url: "http://192.168.15.72:8080/api/nightvision?mode=day"
+    method: POST
+
+  camera_night_ir:
+    url: "http://192.168.15.72:8080/api/nightvision?mode=ir"
+    method: POST
+
+  camera_night_color:
+    url: "http://192.168.15.72:8080/api/nightvision?mode=color"
+    method: POST
+
+  # Sirene / Alarme
+  camera_siren_on:
+    url: "http://192.168.15.72:8080/api/siren?state=on"
+    method: POST
+
+  camera_siren_off:
+    url: "http://192.168.15.72:8080/api/siren?state=off"
+    method: POST
+
+# Sensor REST para status da camera (posicao, iluminacao, uptime)
+sensor:
+  - platform: rest
+    name: "Open-IPCam Status"
+    resource: "http://192.168.15.72:8080/api/status"
+    scan_interval: 10
+    json_attributes:
+      - pos_x
+      - pos_y
+      - night_mode
+      - ir_led
+      - white_led_pct
+      - rtsp_clients
+      - uptime_sec
+    value_template: "OK"
+
+# Camera RTSP nativa (FFmpeg ou WebRTC via go2rtc)
 camera:
   - platform: ffmpeg
-    name: Camera FastIoT
-    input: "rtsp://admin:Ztac@2021@192.168.15.72:554/live/camid_0/main"
+    name: "Open-IPCam V821B"
+    input: "rtsp://192.168.15.72:554/live/main"

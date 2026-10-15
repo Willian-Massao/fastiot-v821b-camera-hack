@@ -1,4 +1,4 @@
-# Exemplo de configuracao para o servidor go2rtc
+# Configuracao para o go2rtc (WebRTC Ultra-Low Latency no Home Assistant)
 api:
   listen: ":1984"
 
@@ -6,5 +6,7 @@ rtsp:
   listen: ":8554"
 
 streams:
-  Entrada:
-    - rtsp://admin:Ztac@2021@192.168.15.72:554/live/camid_0/main
+  camera_principal:
+    - rtsp://192.168.15.72:554/live/main
+  camera_sub:
+    - rtsp://192.168.15.72:554/live/sub

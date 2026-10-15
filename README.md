@@ -1,17 +1,39 @@
-# FastIoT V821B IP Camera Local Hack & PTZ Control
+# FastIoT V821B & Open-IPCam: Firmware Reverse Engineering & Clean Local Stack
 
-Transformação completa de câmeras IP chinesas baseadas no SoC **Allwinner/Cvitek V821B (RISC-V 32-bit)** rodando firmware **FastIoT** em dispositivos **100% locais, privados e integrados ao Home Assistant**, sem dependência de nuvem chinesa, aplicativo de terceiros ou assinaturas pagas.
+Transformação completa de câmeras IP baseadas no SoC **Allwinner/Cvitek V821B (RISC-V 32-bit RV32GC)** rodando firmware **FastIoT / Tina Linux** em dispositivos **100% locais, open-source e integrados nativamente ao Home Assistant**, sem dependência de nuvem chinesa, aplicativo mobile ou assinaturas pagas.
 
 ---
 
-## 🌟 Funcionalidades Desbloqueadas
+## 🌟 Funcionalidades e Engenharia Reversa Realizada
 
-- **Acesso Root Total (Telnet):** Shell `/bin/ash` direto na porta `23` sem senha.
-- **Painel Web Gráfico Local:** Interface responsiva na porta `8080` com teclado direcional PTZ.
-- **Controle Motor PTZ via API HTTP:** Endpoints locais para movimentação (Cima, Baixo, Esquerda, Direita, Parar).
-- **Streaming de Vídeo & Áudio (RTSP):** Fluxo H.264 + áudio G.711A na porta `554` compatível com VLC, go2rtc, Frigate, Scrypted e Home Assistant.
-- **Bloqueio Total de Nuvem (Privacidade 100% Local):** Isolamento automático de rede que impede envio de dados para servidores externos (China, AWS, DDNS), mantendo funcionamento total na rede local (LAN).
-- **Zero Modificações na Memória Flash:** Todo o sistema roda a partir de um cartão MicroSD (FAT32), preservando o firmware original intacto.
+A partir da desmontagem do firmware original e análise estática via **Ghidra 12.1.4** e **REA (Reverse Engineer Anything)**, foram mapeados todos os subsistemas de hardware:
+
+1. **Controle Motor PTZ (`/dev/motor`)**:
+   - Dispositivo de caractere padrão do kernel Linux (`motor.ko`).
+   - Ioctls decodificados:
+     - `0x80044d01` (`_IOW('M', 1, int)`): Movimentação por passos.
+     - `0x80044d02` (`_IOR('M', 2, int)`): Leitura de posição.
+     - `0x80044d03` (`_IOW('M', 3, int)`): Velocidade de movimentação (1 a 10).
+     - `0x80044d0f` / `0x80044d10`: Início de movimento horizontal/vertical.
+     - `0x80044d11` (`_IOW('M', 17, int)`): Parada do motor.
+   - Posição persistida em `/userdata/Config/MotorPos.cfg`.
+
+2. **GPIOs, Visao Noturna & Iluminação**:
+   - **IRCUT Filter (Solenóide biestável)**: GPIO `118` (ENA) e `119` (ENB).
+     - Modo Dia: Filtro de corte infravermelho posicionado (bloqueia IR).
+     - Modo Noite: Filtro recolhido (permite luz IR no sensor).
+   - **LED Infravermelho (IR LED)**: GPIO `103` (iluminador noturno).
+   - **Holofote / Luz Branca (White Spotlight LED)**: GPIO `104` (PWM/digital).
+   - **Sirene / Amplificador de Áudio (`SPK_EN`)**: GPIO `79` (habilita amplificador do alto-falante).
+   - **Botão de Reset**: GPIO `102`.
+
+3. **Novo App Substituto Open Source (`open-ipcam`)**:
+   - Binário C nativo e ultraleve (~34 KB a 106 KB estático) compilado com `riscv32-linux-musl-gcc`.
+   - **Zero Nuvem**: Não faz conexões externas para `sightcloud.cn` ou servidores desconhecidos.
+   - **Servidor RTSP Integrado (RFC 2326)** na porta `554` (suporta RTP UDP e TCP Interleaved para Home Assistant/go2rtc).
+   - **Painel Web Responsivo** na porta `8080` com teclado direcional PTZ, alternador de visão noturna (Dia / Noite IR / Noite Colorida), gatilho de sirene e métricas do sistema.
+   - **REST API Completa**: Endpoints JSON para Home Assistant (`/api/status`, `/api/ptz`, `/api/nightvision`, `/api/siren`).
+   - **Home Assistant MQTT Auto-Discovery**: Descoberta automática de câmera, botões PTZ, interruptores de iluminação e sirene no Home Assistant via MQTT.
 
 ---
 
@@ -20,48 +42,69 @@ Transformação completa de câmeras IP chinesas baseadas no SoC **Allwinner/Cvi
 ```text
 ├── sdcard/
 │   └── FastIoT_factoryTest/      <-- Pasta pronta para copiar para a raiz do MicroSD
-│       ├── factory.sh            # Script de inicialização automática (root hook)
+│       ├── factory.sh            # Script de inicialização automática no boot (root hook)
+│       ├── open-ipcam            # Novo daemon open-source (RISC-V 32-bit dinâmico)
+│       ├── open-ipcam-static     # Versão estática autônoma (RISC-V 32-bit estático)
+│       ├── open-ipcam.conf       # Arquivo de configuração (Portas, MQTT, PTZ, Credenciais)
 │       ├── block_wan.sh          # Script de bloqueio de saída para a Internet (LAN-only)
-│       ├── ipcam_launcher.sh     # Wrapper com injeção LD_PRELOAD
-│       ├── ptz_bridge.so         # Biblioteca injetada no ipcam (RISC-V 32-bit)
-│       ├── cam_server            # Servidor Web HTTP 8080 + Telnet backup 2323
+│       ├── ipcam_launcher.sh     # Wrapper de execução alternativa
+│       ├── ptz_bridge.so         # Hook de interoperabilidade com o app antigo
 │       └── busybox               # BusyBox estático RISC-V 32-bit com todas as ferramentas
 ├── src/
-│   ├── ptz_bridge.c              # Código fonte da ponte PTZ (LD_PRELOAD)
-│   ├── cam_server.c              # Código fonte do servidor Web e Telnet
-│   ├── Makefile                  # Script de compilação
-│   └── build.sh                  # Script de automação de build com riscv32-musl
+│   ├── open-ipcam/               # Código-fonte completo do novo daemon open-source
+│   │   ├── include/
+│   │   │   ├── common.h          # Tipos e estruturas compartilhadas
+│   │   │   ├── motor_ctrl.h      # Driver e ioctls do motor PTZ
+│   │   │   ├── gpio_ctrl.h       # Controle dos GPIOs (IRCUT, IR LED, Spotlight, Sirene)
+│   │   │   ├── rtsp_server.h     # Servidor RTSP 1.0 (RFC 2326)
+│   │   │   ├── http_server.h     # Servidor Web e REST API
+│   │   │   └── ha_mqtt.h         # Cliente MQTT 3.1.1 para Auto-Discovery no Home Assistant
+│   │   ├── motor_ctrl.c          # Implementação do controle do motor
+│   │   ├── gpio_ctrl.c           # Implementação dos GPIOs e filtros
+│   │   ├── rtsp_server.c         # Implementação do streaming RTSP
+│   │   ├── http_server.c         # Implementação da Web UI e REST API
+│   │   ├── ha_mqtt.c             # Implementação do protocolo MQTT
+│   │   ├── main.c                # Orquestrador principal
+│   │   ├── build.sh              # Script de compilação cruzada (WSL / Linux)
+│   │   └── Makefile              # Makefile padrão
+│   ├── ptz_bridge.c              # Código fonte do bridge antigo
+│   └── cam_server.c              # Código fonte do servidor Web antigo
 ├── home-assistant/
-│   ├── configuration.yaml        # Configuração dos comandos REST no Home Assistant
-│   ├── dashboard-cards.yaml      # Exemplos de cards Lovelace (Nativo e WebRTC)
-│   └── go2rtc.yaml               # Exemplo de configuração do go2rtc
+│   ├── configuration.yaml        # Configuração dos comandos REST e sensores no HA
+│   ├── dashboard-cards.yaml      # Cards Lovelace (Nativo e WebRTC) com D-pad PTZ
+│   └── go2rtc.yaml               # Configuração do go2rtc (WebRTC Ultra-Low Latency)
 ├── tools/
 │   ├── camera_cmd.py             # Utilitário para executar comandos via Telnet
-│   └── transfer_nc.py            # Utilitário ultrarrápido de transferência via Netcat
+│   └── transfer_nc.py            # Utilitário de transferência via Netcat
 └── README.md
 ```
 
 ---
 
-## 🚀 Como Instalar (Passo a Passo Rápido)
+## 🚀 Como Fazer o Deploy (Passo a Passo)
 
 ### 1. Preparar o Cartão MicroSD
-1. Formate um cartão MicroSD (até 32GB ou 64GB) em **FAT32**.
-2. Copie a pasta `FastIoT_factoryTest` (localizada dentro de `sdcard/`) diretamente para a **raiz do cartão MicroSD**:
+1. Formate um cartão MicroSD (até 64GB) em **FAT32**.
+2. Copie a pasta `FastIoT_factoryTest` (localizada em `sdcard/`) diretamente para a **raiz do cartão MicroSD**:
    ```text
    E:\FastIoT_factoryTest\
        ├── factory.sh
+       ├── open-ipcam-static
+       ├── open-ipcam.conf
        ├── block_wan.sh
-       ├── ipcam_launcher.sh
-       ├── ptz_bridge.so
-       ├── cam_server
        └── busybox
+   ```
+3. *(Opcional)* Edite o arquivo `open-ipcam.conf` para habilitar o MQTT do seu Home Assistant:
+   ```ini
+   mqtt_enabled=true
+   mqtt_broker=192.168.15.100
+   mqtt_port=1883
    ```
 
 ### 2. Iniciar a Câmera
-1. Com a câmera desligada da tomada, insira o cartão MicroSD.
+1. Com a câmera desligada, insira o cartão MicroSD.
 2. Ligue a câmera na tomada.
-3. Aguarde cerca de 15 a 20 segundos para a inicialização completa.
+3. A câmera executará automaticamente o script `factory.sh` da raiz do SD Card no boot.
 
 ---
 
@@ -69,183 +112,39 @@ Transformação completa de câmeras IP chinesas baseadas no SoC **Allwinner/Cvi
 
 | Serviço | Porta / Protocolo | URL / Como Usar |
 | :--- | :--- | :--- |
-| **Painel Web PTZ** | TCP `8080` (HTTP) | `http://<IP_DA_CAMERA>:8080` |
-| **Stream RTSP** | TCP `554` (RTSP) | `rtsp://admin:Ztac@2021@<IP_DA_CAMERA>:554/live/camid_0/main` |
+| **Painel Web Open-IPCam** | TCP `8080` (HTTP) | `http://<IP_DA_CAMERA>:8080` |
+| **Stream RTSP Principal (1080P)** | TCP `554` (RTSP) | `rtsp://<IP_DA_CAMERA>:554/live/main` |
+| **Stream RTSP Secundário (360P)** | TCP `554` (RTSP) | `rtsp://<IP_DA_CAMERA>:554/live/sub` |
 | **Terminal Root** | TCP `23` (Telnet) | `telnet <IP_DA_CAMERA> 23` |
-| **API HTTP PTZ** | TCP `8080` (HTTP) | `http://<IP_DA_CAMERA>:8080/cmd?dir=<u\|d\|l\|r\|s>` |
-
-### Comandos da API HTTP:
-- **Cima (Up):** `GET /cmd?dir=u`
-- **Baixo (Down):** `GET /cmd?dir=d`
-- **Esquerda (Left):** `GET /cmd?dir=l`
-- **Direita (Right):** `GET /cmd?dir=r`
-- **Parar (Stop):** `GET /cmd?dir=s`
+| **API REST de Status** | TCP `8080` (HTTP) | `GET http://<IP_DA_CAMERA>:8080/api/status` |
+| **API REST PTZ** | TCP `8080` (HTTP) | `POST http://<IP_DA_CAMERA>:8080/api/ptz?dir=<u\|d\|l\|r\|s\|h>` |
+| **API REST Visão Noturna** | TCP `8080` (HTTP) | `POST http://<IP_DA_CAMERA>:8080/api/nightvision?mode=<day\|ir\|color\|auto>` |
+| **API REST Sirene** | TCP `8080` (HTTP) | `POST http://<IP_DA_CAMERA>:8080/api/siren?state=<on\|off>` |
 
 ---
 
-## 🏠 Integração com Home Assistant
+## 🏠 Integração com o Home Assistant
 
-### 1. Comandos de Movimento (`configuration.yaml`)
-Adicione no seu `configuration.yaml`:
+### 1. Comandos REST e Entidades (`configuration.yaml`)
+Adicione no seu `configuration.yaml` do Home Assistant os blocos contidos em [`home-assistant/configuration.yaml`](home-assistant/configuration.yaml).
 
-```yaml
-rest_command:
-  camera_ptz:
-    url: "http://<IP_DA_CAMERA>:8080/cmd?dir={{ direction }}"
-    method: GET
-
-  camera_ptz_up:
-    url: "http://<IP_DA_CAMERA>:8080/cmd?dir=u"
-    method: GET
-
-  camera_ptz_down:
-    url: "http://<IP_DA_CAMERA>:8080/cmd?dir=d"
-    method: GET
-
-  camera_ptz_left:
-    url: "http://<IP_DA_CAMERA>:8080/cmd?dir=l"
-    method: GET
-
-  camera_ptz_right:
-    url: "http://<IP_DA_CAMERA>:8080/cmd?dir=r"
-    method: GET
-
-  camera_ptz_stop:
-    url: "http://<IP_DA_CAMERA>:8080/cmd?dir=s"
-    method: GET
-```
-
-### 2. Vídeo RTSP
-Vá em **Configurações** ➔ **Dispositivos e Serviços** ➔ **Adicionar Integração** ➔ **Generic Camera** e use:
-```text
-rtsp://admin:Ztac@2021@<IP_DA_CAMERA>:554/live/camid_0/main
-```
-
-### 3. Card do Dashboard (Lovelace Nativo)
-Adicione um card do tipo **Manual** no seu painel:
-
-```yaml
-type: vertical-stack
-cards:
-  - type: picture-entity
-    entity: camera.generic_camera
-    name: Câmera IP
-    camera_view: live
-
-  - type: grid
-    columns: 3
-    square: false
-    cards:
-      - type: button
-        icon: mdi:arrow-top-left
-        show_name: false
-        tap_action: { action: none }
-
-      - type: button
-        icon: mdi:arrow-up-bold
-        show_name: false
-        tap_action:
-          action: call-service
-          service: rest_command.camera_ptz
-          data: { direction: u }
-
-      - type: button
-        icon: mdi:arrow-top-right
-        show_name: false
-        tap_action: { action: none }
-
-      - type: button
-        icon: mdi:arrow-left-bold
-        show_name: false
-        tap_action:
-          action: call-service
-          service: rest_command.camera_ptz
-          data: { direction: l }
-
-      - type: button
-        icon: mdi:stop-circle-outline
-        show_name: false
-        tap_action:
-          action: call-service
-          service: rest_command.camera_ptz
-          data: { direction: s }
-
-      - type: button
-        icon: mdi:arrow-right-bold
-        show_name: false
-        tap_action:
-          action: call-service
-          service: rest_command.camera_ptz
-          data: { direction: r }
-
-      - type: button
-        icon: mdi:arrow-bottom-left
-        show_name: false
-        tap_action: { action: none }
-
-      - type: button
-        icon: mdi:arrow-down-bold
-        show_name: false
-        tap_action:
-          action: call-service
-          service: rest_command.camera_ptz
-          data: { direction: d }
-
-      - type: button
-        icon: mdi:arrow-bottom-right
-        show_name: false
-        tap_action: { action: none }
-```
+### 2. Auto-Discovery via MQTT
+Se o parâmetro `mqtt_enabled=true` for ativado no `open-ipcam.conf`, o Home Assistant detectará automaticamente:
+- Entidade de Câmera (`camera.open_ipcam`)
+- Botões PTZ (`button.open_ipcam_ptz_up`, `down`, `left`, `right`, `home`)
+- Interruptores de Luz / IR (`switch.open_ipcam_ir_led`, `light.open_ipcam_spotlight`)
+- Sirene de Alarme (`siren.open_ipcam_siren`)
 
 ---
 
-## 🔬 Detalhes Técnicos da Engenharia Reversa
+## 🔨 Como Compilar a Partir do Código Fonte
 
-### 1. Vetor de Execução Inicial (Root Hook)
-O script `/system/start.sh` original do firmware possui o seguinte trecho:
-```sh
-if [ -f /media/FastIoT_factoryTest/factory.sh ]; then
-    /media/FastIoT_factoryTest/factory.sh &
-fi
+Para compilar o binário RISC-V 32-bit no WSL2 ou Linux com o cross-compiler `riscv32-linux-musl-gcc`:
+
+```bash
+cd src/open-ipcam
+chmod +x build.sh
+./build.sh
 ```
-Ao inserir o MicroSD contendo `/media/FastIoT_factoryTest/factory.sh`, o script é executado automaticamente com privilégios de `root`.
 
-### 2. O Desafio do Driver do Motor (`/dev/motor`)
-O módulo de kernel `/system/ko/motor.ko` impõe acesso exclusivo (`open()` retorna `-EBUSY`). Como o binário proprietário `/system/bin/ipcam` mantém o descritor de arquivo aberto o tempo todo, qualquer utilitário externo (`motor_test`) falha ao tentar abrir o dispositivo.
-
-### 3. A Solução: Injeção Dinâmica via `LD_PRELOAD`
-Para controlar o motor sem conflito de driver:
-1. Usamos um bind mount temporário em `/system/bin/ipcam` durante o boot para forçar o carregamento de `ptz_bridge.so` via `LD_PRELOAD`.
-2. A biblioteca `ptz_bridge.so` sobe uma thread que ouve comandos UDP na porta `127.0.0.1:8888`.
-3. Ao receber um comando, ela chama diretamente a função interna do processo:
-   ```c
-   int FastIot_PTZControl(int ptzid, int type);
-   ```
-4. **Ponto de entrada exato:** A função está localizada no endereço virtual **`0x3aa0e`**. Ela utiliza o frame saver do GCC para RISC-V (`__riscv_save_3`). Chamar o corpo interno sem executar esse prólogo causava corrupção de pilha e `SIGSEGV`; ao apontar para `0x3aa0e`, a chamada é 100% estável e idêntica aos comandos do aplicativo original.
-
-### 4. Mapeamento de Direções PTZ
-- `1`: Esquerda (Left)
-- `2`: Direita (Right)
-- `3`: Baixo (Down)
-- `4`: Cima (Up)
-- `0`: Parar (Stop)
-
----
-
-## 🛠️ Como Recompilar os Binários
-
-Para compilar a partir do código fonte em ambiente Linux / WSL2:
-
-1. Baixe o toolchain Musl para RISC-V 32-bit:
-   - Toolchain: `riscv32-linux-musl-cross` (GCC 11.2+)
-2. Execute o script de build:
-   ```bash
-   cd src/
-   chmod +x build.sh
-   ./build.sh
-   ```
-
----
-
-## 🛡️ Isenção de Responsabilidade
-Este projeto foi desenvolvido estritamente para fins educacionais, de pesquisa em segurança da informação e interoperabilidade de hardware próprio sob as diretrizes de direito de reparo e posse do consumidor.
+Os binários compilados (`open-ipcam` dinâmico e `open-ipcam-static` estático) serão gerados e copiados automaticamente para a pasta `sdcard/FastIoT_factoryTest/`.
