@@ -43,9 +43,9 @@ static void load_config_file(const char *path) {
 static void set_default_config(void) {
     memset(&g_config, 0, sizeof(g_config));
     g_config.http_port = 8080;
-    g_config.rtsp_port = 554;
-    strcpy(g_config.rtsp_main_path, "/live/main");
-    strcpy(g_config.rtsp_sub_path, "/live/sub");
+    g_config.rtsp_port = 0; // 0 = native hardware RTSP stream on port 554
+    strcpy(g_config.rtsp_main_path, "/live/camid_0/main");
+    strcpy(g_config.rtsp_sub_path, "/live/camid_0/sub");
     g_config.default_motor_speed = 5;
     g_config.motor_step_size = 100;
     g_config.default_night_mode = NIGHT_MODE_DAY;
@@ -85,13 +85,17 @@ int main(int argc, char **argv) {
     wifi_mgr_init();
 
     LOG_INFO("Starting Network Services...");
-    rtsp_server_init(g_config.rtsp_port);
+    if (g_config.rtsp_port > 0) {
+        rtsp_server_init(g_config.rtsp_port);
+    }
     http_server_init(g_config.http_port);
     ha_mqtt_init();
 
-    pthread_t th_rtsp, th_http, th_mqtt, th_wifi;
+    pthread_t th_rtsp = 0, th_http, th_mqtt, th_wifi;
     pthread_create(&th_wifi, NULL, wifi_mgr_thread, NULL);
-    pthread_create(&th_rtsp, NULL, rtsp_server_thread, NULL);
+    if (g_config.rtsp_port > 0) {
+        pthread_create(&th_rtsp, NULL, rtsp_server_thread, NULL);
+    }
     pthread_create(&th_http, NULL, http_server_thread, NULL);
     if (g_config.mqtt_enabled) {
         pthread_create(&th_mqtt, NULL, ha_mqtt_thread, NULL);
@@ -99,7 +103,7 @@ int main(int argc, char **argv) {
 
     LOG_INFO("Open-IPCam is running!");
     LOG_INFO("Web Dashboard: http://0.0.0.0:%d", g_config.http_port);
-    LOG_INFO("RTSP Stream:   rtsp://0.0.0.0:%d%s", g_config.rtsp_port, g_config.rtsp_main_path);
+    LOG_INFO("RTSP Stream:   rtsp://admin:Ztac@2021@0.0.0.0:554%s", g_config.rtsp_main_path);
 
     while (g_running) {
         sleep(1);
@@ -107,12 +111,16 @@ int main(int argc, char **argv) {
 
     LOG_INFO("Stopping services...");
     wifi_mgr_stop();
-    rtsp_server_stop();
+    if (g_config.rtsp_port > 0) {
+        rtsp_server_stop();
+    }
     http_server_stop();
     ha_mqtt_stop();
 
     pthread_join(th_wifi, NULL);
-    pthread_join(th_rtsp, NULL);
+    if (g_config.rtsp_port > 0) {
+        pthread_join(th_rtsp, NULL);
+    }
     pthread_join(th_http, NULL);
     if (g_config.mqtt_enabled) {
         pthread_join(th_mqtt, NULL);

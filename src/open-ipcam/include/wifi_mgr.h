@@ -4,8 +4,9 @@
 #include "common.h"
 
 #define WIFI_AP_DEFAULT_SSID "OpenIPCam-Setup"
-#define WIFI_CONFIG_FILE "/media/FastIoT_factoryTest/wifi.conf"
-#define WPA_CONF_FILE "/userdata/Config/wpa_supplicant.conf"
+#define WIFI_USERDATA_CONF   "/userdata/Config/wifi.conf"
+#define WIFI_SDCARD_CONF     "/media/FastIoT_factoryTest/wifi.conf"
+#define WPA_CONF_FILE        "/userdata/Config/wpa_supplicant.conf"
 
 typedef enum {
     WIFI_STATE_UNCONFIGURED = 0,

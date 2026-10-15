@@ -3,20 +3,21 @@
 
 #include "common.h"
 
-// Motor ioctl definitions from disassembled motor.ko
-#define MOTOR_IOC_MAGIC       'M'
-#define MOTOR_IOCTL_MOVE_STEP   _IOW(MOTOR_IOC_MAGIC, 1, int)
-#define MOTOR_IOCTL_GET_POS     _IOR(MOTOR_IOC_MAGIC, 2, int)
-#define MOTOR_IOCTL_SET_SPEED   _IOW(MOTOR_IOC_MAGIC, 3, int)
-#define MOTOR_IOCTL_MOVE_DUAL   _IOW(MOTOR_IOC_MAGIC, 5, struct motor_dual_move)
-#define MOTOR_IOCTL_MOVE_HORIZ  _IOW(MOTOR_IOC_MAGIC, 15, int)
-#define MOTOR_IOCTL_MOVE_VERT   _IOW(MOTOR_IOC_MAGIC, 16, int)
-#define MOTOR_IOCTL_STOP        _IOW(MOTOR_IOC_MAGIC, 17, int)
+// Actual ioctl definitions from disassembled Cvitek/Allwinner motor.ko
+#define MOTOR_IOCTL_STOP       0x80044d01
+#define MOTOR_IOCTL_MOVE       0x80044d03
+#define MOTOR_IOCTL_GET_STATUS 0x80044d04
+#define MOTOR_IOCTL_SET_SPEED  0x80044d05
+#define MOTOR_IOCTL_RESET_HOME 0x80044d06
 
-struct motor_dual_move {
+struct motor_move_cmd {
     int x_steps;
     int y_steps;
-    int speed;
+};
+
+struct motor_speed_cmd {
+    int speed_x;
+    int speed_y;
 };
 
 typedef enum {

@@ -125,17 +125,17 @@ static const char HTML_DASHBOARD[] =
 "            <div class=\"section-title\">Integracao Home Assistant / RTSP</div>\n"
 "            <div class=\"stream-info\">\n"
 "                <strong>Stream Principal (1080P):</strong><br>\n"
-"                <code id=\"urlMain\">rtsp://IP:554/live/main</code><br><br>\n"
+"                <code id=\"urlMain\">rtsp://admin:Ztac@2021@IP:554/live/camid_0/main</code><br><br>\n"
 "                <strong>Stream Secundario (360P):</strong><br>\n"
-"                <code id=\"urlSub\">rtsp://IP:554/live/sub</code>\n"
+"                <code id=\"urlSub\">rtsp://admin:Ztac@2021@IP:554/live/camid_0/sub</code>\n"
 "            </div>\n"
 "        </div>\n"
 "    </div>\n"
 "\n"
 "    <script>\n"
 "        const host = window.location.hostname;\n"
-"        document.getElementById('urlMain').innerText = 'rtsp://' + host + ':554/live/main';\n"
-"        document.getElementById('urlSub').innerText = 'rtsp://' + host + ':554/live/sub';\n"
+"        document.getElementById('urlMain').innerText = 'rtsp://admin:Ztac@2021@' + host + ':554/live/camid_0/main';\n"
+"        document.getElementById('urlSub').innerText = 'rtsp://admin:Ztac@2021@' + host + ':554/live/camid_0/sub';\n"
 "\n"
 "        function scanWifi() {\n"
 "            const sel = document.getElementById('wifi-select');\n"
@@ -362,6 +362,10 @@ static void handle_api_wifi_setup(int fd, const char *query) {
 }
 
 static void handle_api_wifi_reset(int fd) {
+    unlink(WIFI_USERDATA_CONF);
+    unlink(WIFI_SDCARD_CONF);
+    unlink(WPA_CONF_FILE);
+    sync();
     wifi_mgr_start_ap_mode();
     const char resp[] = "{\"status\":\"reset_to_ap\"}\n";
     send_http_response(fd, 200, "application/json", resp, strlen(resp));

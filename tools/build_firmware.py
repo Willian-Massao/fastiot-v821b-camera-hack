@@ -46,20 +46,27 @@ if [ -x /system/bin/busybox ]; then
     /system/bin/busybox telnetd -l /bin/ash -p 23 &
 fi
 
-# 2. Carrega modulos do kernel
+# 2. Bloqueio total de conexoes externas a nuvem chinesa (Isolamento LAN-only)
+if [ -x /system/bin/block_wan.sh ]; then
+    /system/bin/block_wan.sh &
+elif [ -x /media/FastIoT_factoryTest/block_wan.sh ]; then
+    /media/FastIoT_factoryTest/block_wan.sh &
+fi
+
+# 3. Carrega modulos do kernel
 sh /system/ko/loadsystemko.sh
 insmod /system/ko/xradio_bt_smd.ko
 insmod /system/ko/motor.ko
 insmod /system/ko/logger.ko
 
-# 3. Configuracoes de hardware e registradores sunxi
+# 4. Configuracoes de hardware e registradores sunxi
 echo 97 > /sys/class/gpio/export 2>/dev/null
 echo out > /sys/class/gpio/gpio97/direction 2>/dev/null
 echo 1 > /sys/class/gpio/gpio97/value 2>/dev/null
 echo 0x42000358 0x00000003 > /sys/class/sunxi_dump/write 2>/dev/null
 echo 0x420000ac 0x33111111 > /sys/class/sunxi_dump/write 2>/dev/null
 
-# 4. Diretorios de configuracao persistentes
+# 5. Diretorios de configuracao persistentes
 mkdir -p /userdata/Config
 if [ ! -f /userdata/local_timezone ]; then
     ln -s /system/zoneinfo/Shanghai /userdata/local_timezone 2>/dev/null
@@ -68,7 +75,7 @@ fi
 export LD_LIBRARY_PATH="/system/lib:/lib:/usr/lib:/usr/local/lib"
 export PATH="/system/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-# 5. Montagem do MicroSD (se inserido) e hook de seguranca/resgate
+# 6. Montagem do MicroSD (se inserido) e hook de seguranca/resgate
 MDEV=""
 if [ -e /dev/mmcblk0p1 ]; then
     MDEV=/dev/mmcblk0p1
@@ -86,13 +93,18 @@ if [ -f /media/FastIoT_factoryTest/factory.sh ]; then
     exit 0
 fi
 
-# 6. Inicia o daemon Open-IPCam (Web Dashboard 8080, RTSP 554, PTZ, GPIO, MQTT HA, Wi-Fi AP)
-if [ -x /system/bin/open-ipcam-static ]; then
-    /system/bin/open-ipcam-static &
-elif [ -x /system/bin/open-ipcam ]; then
-    /system/bin/open-ipcam &
+# 7. Inicia o subsistema de video H.264 / ISP e RTSP nativo (com hook de PTZ)
+if [ -f /system/lib/ptz_bridge.so ] && [ -x /system/bin/ipcam ]; then
+    LD_PRELOAD=/system/lib/ptz_bridge.so /system/bin/ipcam &
 elif [ -x /system/bin/ipcam ]; then
     /system/bin/ipcam &
+fi
+
+# 8. Inicia o daemon Open-IPCam (Painel Web 8080, Wi-Fi AP Provisioning, PTZ, GPIO, Home Assistant MQTT)
+if [ -x /system/bin/open-ipcam ]; then
+    /system/bin/open-ipcam &
+elif [ -x /system/bin/open-ipcam-static ]; then
+    /system/bin/open-ipcam-static &
 fi
 
 exit 0
@@ -150,37 +162,33 @@ def main():
             f.write(sqfs_bytes)
         subprocess.run(["unsquashfs", "-d", staging_dir, "-f", raw_sqfs], check=True)
 
-    # 2. Injetar binarios do Open-IPCam
-    print("[2/6] Injetando binarios Open-IPCam e BusyBox...")
+    # 2. Injetar binarios do Open-IPCam, BusyBox e PTZ Bridge
+    print("[2/6] Injetando binarios Open-IPCam, BusyBox, PTZ Bridge e Block WAN...")
     bin_dir = os.path.join(staging_dir, "bin")
+    lib_dir = os.path.join(staging_dir, "lib")
     os.makedirs(bin_dir, exist_ok=True)
+    os.makedirs(lib_dir, exist_ok=True)
 
     src_open_ipcam = os.path.join(SDCARD_DIR, "open-ipcam")
-    src_open_ipcam_static = os.path.join(SDCARD_DIR, "open-ipcam-static")
     src_busybox = os.path.join(SDCARD_DIR, "busybox")
+    src_block_wan = os.path.join(SDCARD_DIR, "block_wan.sh")
+    src_ptz_bridge = os.path.join(SDCARD_DIR, "ptz_bridge.so")
     src_conf = os.path.join(SDCARD_DIR, "open-ipcam.conf")
 
-    # Remove o ipcam proprietario gigante (5.1MB)
-    orig_ipcam_bin = os.path.join(bin_dir, "ipcam")
-    if os.path.lexists(orig_ipcam_bin):
-        if os.path.islink(orig_ipcam_bin) or os.path.isfile(orig_ipcam_bin):
-            os.remove(orig_ipcam_bin)
+    # Copia open-ipcam para /system/bin/open-ipcam
+    if os.path.exists(src_open_ipcam):
+        shutil.copy2(src_open_ipcam, os.path.join(bin_dir, "open-ipcam"))
+        os.chmod(os.path.join(bin_dir, "open-ipcam"), 0o755)
 
-    for f_src in [src_open_ipcam, src_open_ipcam_static, src_busybox]:
-        if not os.path.exists(f_src):
-            print(f"[!] Erro: arquivo necessario nao encontrado: {f_src}")
-            sys.exit(1)
-        dest = os.path.join(bin_dir, os.path.basename(f_src))
-        if os.path.lexists(dest):
-            os.remove(dest)
-        shutil.copy2(f_src, dest)
-        os.chmod(dest, 0o755)
+    # Copia block_wan.sh para /system/bin/block_wan.sh
+    if os.path.exists(src_block_wan):
+        shutil.copy2(src_block_wan, os.path.join(bin_dir, "block_wan.sh"))
+        os.chmod(os.path.join(bin_dir, "block_wan.sh"), 0o755)
 
-    # Cria symlink ipcam -> open-ipcam-static
-    try:
-        os.symlink("open-ipcam-static", orig_ipcam_bin)
-    except OSError:
-        shutil.copy2(src_open_ipcam_static, orig_ipcam_bin)
+    # Copia ptz_bridge.so para /system/lib/ptz_bridge.so
+    if os.path.exists(src_ptz_bridge):
+        shutil.copy2(src_ptz_bridge, os.path.join(lib_dir, "ptz_bridge.so"))
+        os.chmod(os.path.join(lib_dir, "ptz_bridge.so"), 0o755)
 
     # Copia arquivo de configuracao para /system/config/
     cfg_dir = os.path.join(staging_dir, "config")

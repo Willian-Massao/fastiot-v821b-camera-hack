@@ -33,16 +33,31 @@ static void save_position(void) {
     }
 }
 
+static void send_ptz_bridge_udp(int type) {
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return;
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(8888);
+    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    char msg[16];
+    snprintf(msg, sizeof(msg), "%d", type);
+    sendto(fd, msg, strlen(msg), 0, (struct sockaddr *)&addr, sizeof(addr));
+    close(fd);
+}
+
 int motor_init(void) {
     pthread_mutex_lock(&g_motor_mutex);
     g_motor_fd = open(MOTOR_DEV_PATH, O_RDWR);
     if (g_motor_fd < 0) {
-        LOG_WARN("Could not open %s (%s). Running in simulation mode.", MOTOR_DEV_PATH, strerror(errno));
+        LOG_WARN("Could not open %s (%s). Falling back to ptz_bridge UDP (port 8888).", MOTOR_DEV_PATH, strerror(errno));
     } else {
         LOG_INFO("Successfully opened %s (fd=%d)", MOTOR_DEV_PATH, g_motor_fd);
         // Set initial speed
         int speed = g_config.default_motor_speed > 0 ? g_config.default_motor_speed : DEFAULT_SPEED;
-        ioctl(g_motor_fd, MOTOR_IOCTL_SET_SPEED, speed);
+        struct motor_speed_cmd sc = { .speed_x = speed, .speed_y = speed };
+        ioctl(g_motor_fd, MOTOR_IOCTL_SET_SPEED, &sc);
     }
     load_position();
     pthread_mutex_unlock(&g_motor_mutex);
@@ -55,6 +70,8 @@ void motor_cleanup(void) {
         ioctl(g_motor_fd, MOTOR_IOCTL_STOP, 0);
         close(g_motor_fd);
         g_motor_fd = -1;
+    } else {
+        send_ptz_bridge_udp(0);
     }
     save_position();
     pthread_mutex_unlock(&g_motor_mutex);
@@ -71,12 +88,18 @@ int motor_move(motor_direction_t dir, int steps) {
     pthread_mutex_unlock(&g_state_mutex);
 
     int ret = 0;
+    struct motor_move_cmd cmd = {0, 0};
+
     switch (dir) {
         case MOTOR_DIR_UP:
             g_curr_y += steps;
             if (g_curr_y > DEFAULT_MAX_Y) g_curr_y = DEFAULT_MAX_Y;
+            cmd.x_steps = 0;
+            cmd.y_steps = steps;
             if (g_motor_fd >= 0) {
-                ret = ioctl(g_motor_fd, MOTOR_IOCTL_MOVE_VERT, steps);
+                ret = ioctl(g_motor_fd, MOTOR_IOCTL_MOVE, &cmd);
+            } else {
+                send_ptz_bridge_udp(1);
             }
             LOG_INFO("Motor UP %d steps (Y=%d)", steps, g_curr_y);
             break;
@@ -84,8 +107,12 @@ int motor_move(motor_direction_t dir, int steps) {
         case MOTOR_DIR_DOWN:
             g_curr_y -= steps;
             if (g_curr_y < 0) g_curr_y = 0;
+            cmd.x_steps = 0;
+            cmd.y_steps = -steps;
             if (g_motor_fd >= 0) {
-                ret = ioctl(g_motor_fd, MOTOR_IOCTL_MOVE_VERT, -steps);
+                ret = ioctl(g_motor_fd, MOTOR_IOCTL_MOVE, &cmd);
+            } else {
+                send_ptz_bridge_udp(2);
             }
             LOG_INFO("Motor DOWN %d steps (Y=%d)", steps, g_curr_y);
             break;
@@ -93,8 +120,12 @@ int motor_move(motor_direction_t dir, int steps) {
         case MOTOR_DIR_LEFT:
             g_curr_x -= steps;
             if (g_curr_x < 0) g_curr_x = 0;
+            cmd.x_steps = -steps;
+            cmd.y_steps = 0;
             if (g_motor_fd >= 0) {
-                ret = ioctl(g_motor_fd, MOTOR_IOCTL_MOVE_HORIZ, -steps);
+                ret = ioctl(g_motor_fd, MOTOR_IOCTL_MOVE, &cmd);
+            } else {
+                send_ptz_bridge_udp(3);
             }
             LOG_INFO("Motor LEFT %d steps (X=%d)", steps, g_curr_x);
             break;
@@ -102,8 +133,12 @@ int motor_move(motor_direction_t dir, int steps) {
         case MOTOR_DIR_RIGHT:
             g_curr_x += steps;
             if (g_curr_x > DEFAULT_MAX_X) g_curr_x = DEFAULT_MAX_X;
+            cmd.x_steps = steps;
+            cmd.y_steps = 0;
             if (g_motor_fd >= 0) {
-                ret = ioctl(g_motor_fd, MOTOR_IOCTL_MOVE_HORIZ, steps);
+                ret = ioctl(g_motor_fd, MOTOR_IOCTL_MOVE, &cmd);
+            } else {
+                send_ptz_bridge_udp(4);
             }
             LOG_INFO("Motor RIGHT %d steps (X=%d)", steps, g_curr_x);
             break;
@@ -111,6 +146,8 @@ int motor_move(motor_direction_t dir, int steps) {
         case MOTOR_DIR_STOP:
             if (g_motor_fd >= 0) {
                 ret = ioctl(g_motor_fd, MOTOR_IOCTL_STOP, 0);
+            } else {
+                send_ptz_bridge_udp(0);
             }
             LOG_INFO("Motor STOP requested");
             break;
@@ -120,8 +157,9 @@ int motor_move(motor_direction_t dir, int steps) {
             g_curr_x = DEFAULT_MAX_X / 2;
             g_curr_y = DEFAULT_MAX_Y / 2;
             if (g_motor_fd >= 0) {
-                ioctl(g_motor_fd, MOTOR_IOCTL_STOP, 0);
-                usleep(50000);
+                ioctl(g_motor_fd, MOTOR_IOCTL_RESET_HOME, 0);
+            } else {
+                send_ptz_bridge_udp(0);
             }
             break;
 
@@ -161,7 +199,8 @@ int motor_set_speed(int speed) {
     pthread_mutex_lock(&g_motor_mutex);
     int ret = 0;
     if (g_motor_fd >= 0) {
-        ret = ioctl(g_motor_fd, MOTOR_IOCTL_SET_SPEED, speed);
+        struct motor_speed_cmd sc = { .speed_x = speed, .speed_y = speed };
+        ret = ioctl(g_motor_fd, MOTOR_IOCTL_SET_SPEED, &sc);
     }
     pthread_mutex_unlock(&g_motor_mutex);
     return ret;

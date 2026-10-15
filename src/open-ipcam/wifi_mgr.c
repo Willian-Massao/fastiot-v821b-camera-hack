@@ -106,14 +106,27 @@ int wifi_mgr_configure_and_connect(const char *ssid, const char *password) {
     strncpy(g_current_ssid, ssid, sizeof(g_current_ssid) - 1);
     pthread_mutex_unlock(&g_wifi_mutex);
 
-    // 1. Save config to persistent storage
-    FILE *f = fopen(WIFI_CONFIG_FILE, "w");
+    // 1. Ensure persistent config folder exists on NOR flash (/userdata is JFFS2)
+    run_command_silent("mkdir -p /userdata/Config 2>/dev/null");
+
+    // 2. Save credentials to permanent flash storage (/userdata/Config/wifi.conf)
+    FILE *f = fopen(WIFI_USERDATA_CONF, "w");
+    if (f) {
+        fprintf(f, "ssid=%s\npassword=%s\n", ssid, password ? password : "");
+        fclose(f);
+        LOG_INFO("Saved Wi-Fi configuration to permanent flash: %s", WIFI_USERDATA_CONF);
+    } else {
+        LOG_ERROR("Failed to write to %s: %s", WIFI_USERDATA_CONF, strerror(errno));
+    }
+
+    // Also mirror to MicroSD if available
+    f = fopen(WIFI_SDCARD_CONF, "w");
     if (f) {
         fprintf(f, "ssid=%s\npassword=%s\n", ssid, password ? password : "");
         fclose(f);
     }
 
-    // 2. Write standard wpa_supplicant.conf
+    // 3. Write standard wpa_supplicant.conf
     f = fopen(WPA_CONF_FILE, "w");
     if (f) {
         fprintf(f,
@@ -130,7 +143,10 @@ int wifi_mgr_configure_and_connect(const char *ssid, const char *password) {
         fclose(f);
     }
 
-    // 3. Extinguish AP mode completely (kill udhcpd and close AP)
+    // Flush all filesystem write buffers to physical NOR Flash immediately!
+    sync();
+
+    // 4. Extinguish AP mode completely (kill udhcpd and close AP)
     LOG_INFO("Closing AP mode network '%s'...", WIFI_AP_DEFAULT_SSID);
     run_command_silent("killall -9 udhcpd 2>/dev/null");
     run_command_silent("wifi -f ap 2>/dev/null");
@@ -218,10 +234,11 @@ int wifi_mgr_scan(wifi_scan_result_t *results, int max_results) {
 }
 
 int wifi_mgr_init(void) {
-    // Check if wifi.conf exists
-    FILE *f = fopen(WIFI_CONFIG_FILE, "r");
+    // Check if wifi.conf exists in permanent flash first (/userdata/Config/wifi.conf)
+    FILE *f = fopen(WIFI_USERDATA_CONF, "r");
     if (!f) {
-        f = fopen("/userdata/Config/wifi.conf", "r");
+        // Fallback to SD card
+        f = fopen(WIFI_SDCARD_CONF, "r");
     }
 
     if (f) {
@@ -266,8 +283,10 @@ void *wifi_mgr_thread(void *arg) {
             rst_press_seconds++;
             if (rst_press_seconds >= 3) {
                 LOG_WARN("Reset button held for 3 seconds! Resetting to AP Provisioning Mode...");
-                unlink(WIFI_CONFIG_FILE);
-                unlink("/userdata/Config/wifi.conf");
+                unlink(WIFI_USERDATA_CONF);
+                unlink(WIFI_SDCARD_CONF);
+                unlink(WPA_CONF_FILE);
+                sync();
                 wifi_mgr_start_ap_mode();
                 rst_press_seconds = 0;
             }
